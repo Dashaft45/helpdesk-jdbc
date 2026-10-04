@@ -18,8 +18,8 @@ public class Main {
         t.setDescription("Не подключается к корпоративной сети");
         t.setStatus(TicketStatus.NEW);
         t.setPriority(TicketPriority.HIGH);
-        t.setCustomerId(1L);   // Анна Петрова
-        t.setCategoryId(1L);   // Сеть
+        t.setCustomerId(1L);
+        t.setCategoryId(1L);
 
         repo.save(t);
         System.out.println("Создана: " + t);
@@ -37,7 +37,7 @@ public class Main {
         // 5. Финальный статус
         repo.findById(id).ifPresent(x -> System.out.println("Финальный статус: " + x));
 
-        // 6. Пробуем недопустимый переход
+        // 6. Проверка отката
         System.out.println("\n=== Проверка отката ===");
         try {
             service.changeStatus(id, TicketStatus.NEW, 2L);
@@ -45,7 +45,10 @@ public class Main {
             System.out.println("Ожидаемая ошибка: " + e.getMessage());
         }
 
-        // 7. Проверяем, что статус не изменился
         repo.findById(id).ifPresent(x -> System.out.println("После неудачной попытки: " + x));
+
+        // 7. JOIN-запрос
+        System.out.println("\n=== Заявки с именами (JOIN) ===");
+        ((JdbcTicketRepository) repo).printTicketsWithNames();
     }
 }

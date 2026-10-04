@@ -130,4 +130,36 @@ public class JdbcTicketRepository implements TicketRepository {
 
         return t;
     }
+
+        public void printTicketsWithNames() {
+        String sql = """
+            SELECT t.id, t.title, t.status, t.priority,
+                   c.name AS category_name,
+                   customer.name AS customer_name,
+                   assignee.name AS assignee_name,
+                   t.created_at
+            FROM tickets t
+            JOIN users customer ON customer.id = t.customer_id
+            LEFT JOIN users assignee ON assignee.id = t.assignee_id
+            LEFT JOIN categories c ON c.id = t.category_id
+            ORDER BY t.created_at DESC
+            """;
+        try (Connection c = DatabaseConfig.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                System.out.printf("#%d %s | %s | %s | Клиент: %s | Исполнитель: %s | Категория: %s%n",
+                    rs.getLong("id"),
+                    rs.getString("title"),
+                    rs.getString("status"),
+                    rs.getString("priority"),
+                    rs.getString("customer_name"),
+                    rs.getString("assignee_name") != null ? rs.getString("assignee_name") : "—",
+                    rs.getString("category_name") != null ? rs.getString("category_name") : "—"
+                );
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Ошибка JOIN-запроса", e);
+        }
+    }
 }
