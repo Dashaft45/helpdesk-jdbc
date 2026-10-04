@@ -5,32 +5,47 @@ import ru.example.helpdesk.model.Ticket;
 import ru.example.helpdesk.model.TicketPriority;
 import ru.example.helpdesk.model.TicketStatus;
 import ru.example.helpdesk.repository.TicketRepository;
+import ru.example.helpdesk.service.TicketService;
 
 public class Main {
     public static void main(String[] args) {
         TicketRepository repo = new JdbcTicketRepository();
+        TicketService service = new TicketService();
 
-        System.out.println("=== Создаём заявку из Java ===");
+        // 1. Создаём заявку
         Ticket t = new Ticket();
-        t.setTitle("Тестовая заявка из Java");
-        t.setDescription("Проверка JDBC INSERT");
+        t.setTitle("Проблема с VPN");
+        t.setDescription("Не подключается к корпоративной сети");
         t.setStatus(TicketStatus.NEW);
         t.setPriority(TicketPriority.HIGH);
         t.setCustomerId(1L);   // Анна Петрова
         t.setCategoryId(1L);   // Сеть
 
-        Ticket saved = repo.save(t);
-        System.out.println("Создана: " + saved);
+        repo.save(t);
+        System.out.println("Создана: " + t);
+        long id = t.getId();
 
-        System.out.println("\n=== Поиск по id ===");
-        repo.findById(saved.getId()).ifPresent(
-            found -> System.out.println("Найдена: " + found)
-        );
+        // 2. NEW -> IN_PROGRESS
+        service.changeStatus(id, TicketStatus.IN_PROGRESS, 2L);
 
-        System.out.println("\n=== Все заявки ===");
-        repo.findAll().forEach(System.out::println);
+        // 3. IN_PROGRESS -> RESOLVED
+        service.changeStatus(id, TicketStatus.RESOLVED, 2L);
 
-        System.out.println("\n=== Заявки со статусом NEW ===");
-        repo.findByStatus(TicketStatus.NEW).forEach(System.out::println);
+        // 4. RESOLVED -> CLOSED
+        service.changeStatus(id, TicketStatus.CLOSED, 2L);
+
+        // 5. Финальный статус
+        repo.findById(id).ifPresent(x -> System.out.println("Финальный статус: " + x));
+
+        // 6. Пробуем недопустимый переход
+        System.out.println("\n=== Проверка отката ===");
+        try {
+            service.changeStatus(id, TicketStatus.NEW, 2L);
+        } catch (IllegalArgumentException e) {
+            System.out.println("Ожидаемая ошибка: " + e.getMessage());
+        }
+
+        // 7. Проверяем, что статус не изменился
+        repo.findById(id).ifPresent(x -> System.out.println("После неудачной попытки: " + x));
     }
 }
