@@ -234,21 +234,129 @@ public class JdbcTicketRepository implements TicketRepository {
         }
     }
 
-    public void assignTicket(long ticketId, long assigneeId) {
-        String sql = """
+        public void assignTicket(long ticketId, long assigneeId, long changedByUserId) {
+        String selectSql = "SELECT status FROM tickets WHERE id = ? FOR UPDATE";
+        String updateSql = """
             UPDATE tickets
             SET assignee_id = ?,
                 status = 'IN_PROGRESS',
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """;
+        String historySql = """
+            INSERT INTO ticket_status_history(ticket_id, old_status, new_status, changed_by_id)
+            VALUES (?, ?::ticket_status, 'IN_PROGRESS'::ticket_status, ?)
+            """;
+
+        try (Connection c = DatabaseConfig.getConnection()) {
+            c.setAutoCommit(false);
+            try {
+                TicketStatus oldStatus;
+                try (PreparedStatement ps = c.prepareStatement(selectSql)) {
+                    ps.setLong(1, ticketId);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (!rs.next()) throw new IllegalArgumentException("Заявка не найдена");
+                        oldStatus = TicketStatus.valueOf(rs.getString("status"));
+                    }
+                }
+
+                try (PreparedStatement ps = c.prepareStatement(updateSql)) {
+                    ps.setLong(1, assigneeId);
+                    ps.setLong(2, ticketId);
+                    ps.executeUpdate();
+                }
+
+                if (oldStatus != TicketStatus.IN_PROGRESS) {
+                    try (PreparedStatement ps = c.prepareStatement(historySql)) {
+                        ps.setLong(1, ticketId);
+                        ps.setString(2, oldStatus.name());
+                        ps.setLong(3, changedByUserId);
+                        ps.executeUpdate();
+                    }
+                }
+
+                c.commit();
+            } catch (Exception e) {
+                c.rollback();
+                throw e;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Ошибка назначения", e);
+        }
+    }
+
+        public void printExternalComments(long ticketId) {
+        String sql = """
+            SELECT c.id, c.text, c.created_at,
+                   u.name AS author_name
+            FROM ticket_comments c
+            JOIN users u ON u.id = c.author_id
+            WHERE c.ticket_id = ? AND c.internal = FALSE
+            ORDER BY c.created_at
+            """;
         try (Connection c = DatabaseConfig.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
-            ps.setLong(1, assigneeId);
-            ps.setLong(2, ticketId);
-            ps.executeUpdate();
+            ps.setLong(1, ticketId);
+            try (ResultSet rs = ps.executeQuery()) {
+                boolean any = false;
+                while (rs.next()) {
+                    any = true;
+                    System.out.printf("  [%s] %s: %s%n",
+                        rs.getTimestamp("created_at").toLocalDateTime(),
+                        rs.getString("author_name"),
+                        rs.getString("text"));
+                }
+                if (!any) System.out.println("  (нет внешних комментариев)");
+            }
         } catch (SQLException e) {
-            throw new RuntimeException("Ошибка назначения исполнителя", e);
+            throw new RuntimeException("Ошибка чтения внешних комментариев", e);
+        }
+    }
+
+        public void printTicketCard(long ticketId) {
+        String sql = """
+            SELECT t.id, t.title, t.description, t.status, t.priority,
+                   t.created_at, t.updated_at, t.closed_at,
+                   customer.name AS customer_name,
+                   assignee.name AS assignee_name,
+                   c.name AS category_name
+            FROM tickets t
+            JOIN users customer ON customer.id = t.customer_id
+            LEFT JOIN users assignee ON assignee.id = t.assignee_id
+            LEFT JOIN categories c ON c.id = t.category_id
+            WHERE t.id = ?
+            """;
+        try (Connection c = DatabaseConfig.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setLong(1, ticketId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    System.out.println("Заявка не найдена");
+                    return;
+                }
+                System.out.println("╔══════════════════════════════════════════════════════╗");
+                System.out.printf( "║ Заявка #%-44d ║%n", rs.getLong("id"));
+                System.out.println("╠══════════════════════════════════════════════════════╣");
+                System.out.printf( "║ Тема:        %-38s ║%n", rs.getString("title"));
+                System.out.printf( "║ Статус:      %-38s ║%n", rs.getString("status"));
+                System.out.printf( "║ Приоритет:   %-38s ║%n", rs.getString("priority"));
+                System.out.printf( "║ Клиент:      %-38s ║%n", rs.getString("customer_name"));
+                System.out.printf( "║ Исполнитель: %-38s ║%n",
+                    rs.getString("assignee_name") != null ? rs.getString("assignee_name") : "—");
+                System.out.printf( "║ Категория:   %-38s ║%n",
+                    rs.getString("category_name") != null ? rs.getString("category_name") : "—");
+                System.out.println("╠══════════════════════════════════════════════════════╣");
+                System.out.printf( "║ Создана:     %-38s ║%n", rs.getTimestamp("created_at").toLocalDateTime());
+                System.out.printf( "║ Обновлена:   %-38s ║%n", rs.getTimestamp("updated_at").toLocalDateTime());
+                java.sql.Timestamp closed = rs.getTimestamp("closed_at");
+                System.out.printf( "║ Закрыта:     %-38s ║%n", closed != null ? closed.toLocalDateTime() : "—");
+                System.out.println("╠══════════════════════════════════════════════════════╣");
+                System.out.println("║ Описание:                                            ║");
+                System.out.printf( "║   %-50s ║%n", rs.getString("description"));
+                System.out.println("╚══════════════════════════════════════════════════════╝");
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Ошибка вывода карточки", e);
         }
     }
 }

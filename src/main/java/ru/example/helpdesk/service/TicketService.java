@@ -56,7 +56,8 @@ public class TicketService {
                 }
 
                 c.commit();
-                System.out.println("Статус изменён: " + oldStatus + " -> " + newStatus);
+                System.out.printf("Статус изменён: %s -> %s в %s%n",
+                    oldStatus, newStatus, java.time.LocalDateTime.now());
 
             } catch (Exception e) {
                 c.rollback();
