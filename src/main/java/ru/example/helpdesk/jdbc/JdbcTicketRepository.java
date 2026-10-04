@@ -162,4 +162,93 @@ public class JdbcTicketRepository implements TicketRepository {
             throw new RuntimeException("Ошибка JOIN-запроса", e);
         }
     }
+
+        public void addComment(long ticketId, long authorId, String text, boolean internal) {
+        String sql = """
+            INSERT INTO ticket_comments(ticket_id, author_id, text, internal)
+            VALUES (?, ?, ?, ?)
+            """;
+        try (Connection c = DatabaseConfig.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setLong(1, ticketId);
+            ps.setLong(2, authorId);
+            ps.setString(3, text);
+            ps.setBoolean(4, internal);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Ошибка добавления комментария", e);
+        }
+    }
+
+    public void printComments(long ticketId) {
+        String sql = """
+            SELECT c.id, c.text, c.internal, c.created_at,
+                   u.name AS author_name, u.role AS author_role
+            FROM ticket_comments c
+            JOIN users u ON u.id = c.author_id
+            WHERE c.ticket_id = ?
+            ORDER BY c.created_at
+            """;
+        try (Connection c = DatabaseConfig.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setLong(1, ticketId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    System.out.printf("  [%s] %s (%s): %s%n",
+                        rs.getBoolean("internal") ? "внутр." : "клиент",
+                        rs.getString("author_name"),
+                        rs.getString("author_role"),
+                        rs.getString("text")
+                    );
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Ошибка чтения комментариев", e);
+        }
+    }
+
+    public void printStatusHistory(long ticketId) {
+        String sql = """
+            SELECT h.old_status, h.new_status, h.changed_at,
+                   u.name AS changed_by_name
+            FROM ticket_status_history h
+            LEFT JOIN users u ON u.id = h.changed_by_id
+            WHERE h.ticket_id = ?
+            ORDER BY h.changed_at
+            """;
+        try (Connection c = DatabaseConfig.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setLong(1, ticketId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    System.out.printf("  %s -> %s (%s) — %s%n",
+                        rs.getString("old_status") != null ? rs.getString("old_status") : "—",
+                        rs.getString("new_status"),
+                        rs.getString("changed_by_name") != null ? rs.getString("changed_by_name") : "—",
+                        rs.getTimestamp("changed_at").toLocalDateTime()
+                    );
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Ошибка чтения истории", e);
+        }
+    }
+
+    public void assignTicket(long ticketId, long assigneeId) {
+        String sql = """
+            UPDATE tickets
+            SET assignee_id = ?,
+                status = 'IN_PROGRESS',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """;
+        try (Connection c = DatabaseConfig.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setLong(1, assigneeId);
+            ps.setLong(2, ticketId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Ошибка назначения исполнителя", e);
+        }
+    }
 }

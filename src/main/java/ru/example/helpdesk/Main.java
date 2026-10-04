@@ -1,54 +1,84 @@
 package ru.example.helpdesk;
 
+import ru.example.helpdesk.config.DatabaseConfig;
 import ru.example.helpdesk.jdbc.JdbcTicketRepository;
-import ru.example.helpdesk.model.Ticket;
-import ru.example.helpdesk.model.TicketPriority;
-import ru.example.helpdesk.model.TicketStatus;
+import ru.example.helpdesk.jdbc.JdbcUserRepository;
+import ru.example.helpdesk.model.*;
 import ru.example.helpdesk.repository.TicketRepository;
+import ru.example.helpdesk.repository.UserRepository;
 import ru.example.helpdesk.service.TicketService;
 
-public class Main {
-    public static void main(String[] args) {
-        TicketRepository repo = new JdbcTicketRepository();
-        TicketService service = new TicketService();
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 
-        // 1. Создаём заявку
+public class Main {
+    public static void main(String[] args) throws Exception {
+        TicketRepository tickets = new JdbcTicketRepository();
+        UserRepository users = new JdbcUserRepository();
+        TicketService service = new TicketService();
+        JdbcTicketRepository jdbcTickets = (JdbcTicketRepository) tickets;
+
+        // 1. Подключение к PostgreSQL — уже проверено
+        System.out.println("=== HELP DESK (JDBC + PostgreSQL) ===");
+
+        // 2. Найти клиента по email
+        User anna = users.findByEmail("anna@example.org").orElseThrow();
+        System.out.println("Клиент: " + anna);
+
+        // 3. Список категорий
+        System.out.println("\nКатегории:");
+        try (Connection c = DatabaseConfig.getConnection();
+             PreparedStatement ps = c.prepareStatement("SELECT id, name FROM categories ORDER BY id");
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                System.out.printf("  #%d %s%n", rs.getLong("id"), rs.getString("name"));
+            }
+        }
+
+        // 4. Создать заявку от Анны
         Ticket t = new Ticket();
         t.setTitle("Проблема с VPN");
         t.setDescription("Не подключается к корпоративной сети");
         t.setStatus(TicketStatus.NEW);
         t.setPriority(TicketPriority.HIGH);
-        t.setCustomerId(1L);
+        t.setCustomerId(anna.getId());
         t.setCategoryId(1L);
-
-        repo.save(t);
-        System.out.println("Создана: " + t);
+        tickets.save(t);
         long id = t.getId();
+        System.out.println("\n5. Создана заявка: " + t);
 
-        // 2. NEW -> IN_PROGRESS
-        service.changeStatus(id, TicketStatus.IN_PROGRESS, 2L);
+        // 6. Найти по id
+        tickets.findById(id).ifPresent(x -> System.out.println("6. Найдена: " + x));
 
-        // 3. IN_PROGRESS -> RESOLVED
-        service.changeStatus(id, TicketStatus.RESOLVED, 2L);
+        // 7. Назначить исполнителя (Сергей, id=3)
+        jdbcTickets.assignTicket(id, 3L);
+        System.out.println("7. Назначен исполнитель Сергей Волков (id=3)");
 
-        // 4. RESOLVED -> CLOSED
-        service.changeStatus(id, TicketStatus.CLOSED, 2L);
+        // 8. Комментарий клиента
+        jdbcTickets.addComment(id, anna.getId(), "Проблема появилась после обновления роутера", false);
 
-        // 5. Финальный статус
-        repo.findById(id).ifPresent(x -> System.out.println("Финальный статус: " + x));
+        // 9. IN_PROGRESS -> RESOLVED
+        service.changeStatus(id, TicketStatus.RESOLVED, 3L);
 
-        // 6. Проверка отката
-        System.out.println("\n=== Проверка отката ===");
-        try {
-            service.changeStatus(id, TicketStatus.NEW, 2L);
-        } catch (IllegalArgumentException e) {
-            System.out.println("Ожидаемая ошибка: " + e.getMessage());
-        }
+        // 10. Внутренний комментарий сотрудника
+        jdbcTickets.addComment(id, 3L, "Заменил настройки VPN-клиента, проблема решена", true);
 
-        repo.findById(id).ifPresent(x -> System.out.println("После неудачной попытки: " + x));
+        // 11. RESOLVED -> CLOSED
+        service.changeStatus(id, TicketStatus.CLOSED, 3L);
 
-        // 7. JOIN-запрос
-        System.out.println("\n=== Заявки с именами (JOIN) ===");
-        ((JdbcTicketRepository) repo).printTicketsWithNames();
+        // 12. Комментарии и история
+        System.out.println("\n12. Комментарии:");
+        jdbcTickets.printComments(id);
+
+        System.out.println("\nИстория статусов:");
+        jdbcTickets.printStatusHistory(id);
+
+        // 13. JOIN-запрос
+        System.out.println("\n13. Все заявки с именами:");
+        jdbcTickets.printTicketsWithNames();
+
+        // 14. Перезапустите программу — заявка останется в БД
+        System.out.println("\n14. Перезапустите программу и убедитесь: заявка сохранилась в PostgreSQL.");
     }
 }
